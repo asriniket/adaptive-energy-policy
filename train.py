@@ -1,13 +1,13 @@
 import torch
 
-from utils import EnergyNetwork, FlowMatchingEnergyTrainer, RobosuiteDataset
+from utils import EnergyNetwork, FlowMatchingEnergyTrainer, GaussianMixtureDataset
 
 
 def main():
-    dataset = RobosuiteDataset("Lift")
+    dataset = GaussianMixtureDataset()
     network = EnergyNetwork(
-        obs_dim=32,
-        action_dim=7,
+        obs_dim=2,
+        action_dim=2,
         hidden_dim=256,
         enc_output_dim=128,
         output_scale=1000.0,
@@ -26,11 +26,11 @@ def main():
         lambda_cd=1e-3,
     )
 
-    trainer.pretrain(iterations=145000)
+    trainer.pretrain(iterations=7500)
     trainer.save_checkpoint("phase1.pt")
 
     trainer.ema_decay = 0.99
-    trainer.train(iterations=2000)
+    trainer.train(iterations=2500)
     trainer.save_checkpoint("phase2.pt")
 
 
