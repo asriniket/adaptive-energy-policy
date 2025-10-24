@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import imageio
@@ -6,11 +7,136 @@ import robosuite as suite
 import torch
 from tqdm import tqdm
 
-from utils import EnergyNetwork, FlowMatchingEnergyTrainer, RobosuiteDataset
+from utils import EnergyMatchingTrainer, EnergyNetwork, EqMTrainer, RobosuiteDataset
 
 
-def evaluate(checkpoint_path, save_name, num_episodes=3, tau_s=3.25):
+def eval(trainer, save_name, sample_kwargs):
+    videos_dir = Path("videos")
+    videos_dir.mkdir(exist_ok=True)
+
+    results_dir = Path("results")
+    results_dir.mkdir(exist_ok=True)
+
+    ep_rewards, ep_successes = [], []
+    for ep in range(num_eval_episodes):
+        obs = env.reset()
+        ep_reward = 0
+        frames = []
+
+        for _ in tqdm(range(num_episode_steps), desc=f"{save_name} Episode {ep + 1}"):
+            actions = trainer.sample_actions(
+                env.sim.get_state().flatten(), **sample_kwargs
+            )
+
+            if action_selection == "min":
+                obs_tensor = (
+                    torch.tensor(
+                        env.sim.get_state().flatten(),
+                        dtype=torch.float32,
+                        device=device,
+                    )
+                    .unsqueeze(0)
+                    .expand(actions.shape[0], -1)
+                )
+                energies = trainer.ema_network(obs_tensor, actions)
+                action = actions[energies.argmin()].cpu().numpy()
+            elif action_selection == "random":
+                rand_idx = torch.randint(0, actions.shape[0], (1,)).item()
+                action = actions[rand_idx].cpu().numpy()
+            elif action_selection == "mean":
+                action = actions.mean(dim=0).cpu().numpy()
+            else:
+                raise ValueError(f"Unknown action_selection: {action_selection}")
+
+            obs, reward, done, info = env.step(action)
+            ep_reward += reward
+            frames.append(obs["agentview_image"][::-1])
+            if done:
+                break
+
+        video_path = videos_dir / f"{save_name}_ep{ep + 1}.mp4"
+        imageio.mimsave(video_path, frames, fps=20)
+        print(
+            f"{save_name} Episode {ep + 1}: reward={ep_reward:.1f}, saved to {video_path}"
+        )
+        ep_rewards.append(ep_reward)
+        ep_successes.append(info.get("success", 0))
+
+    mean_reward = np.mean(ep_rewards)
+    mean_success = np.mean(ep_successes)
+    print(f"{save_name} - Average Reward: {mean_reward:.1f}")
+    print(f"{save_name} - Average Success: {mean_success:.1f}")
+    results = {
+        "episode_rewards": ep_rewards,
+        "episode_successes": ep_successes,
+        "mean_reward": float(mean_reward),
+        "mean_success": float(mean_success),
+        "num_episodes": num_eval_episodes,
+        "action_selection": action_selection,
+        "sample_kwargs": sample_kwargs,
+    }
+
+    results_path = results_dir / f"{save_name}_results.json"
+    with open(results_path, "w") as f:
+        json.dump(results, f, indent=2)
+    print(f"Results saved to {results_path}")
+
+
+def eval_energy_matching():
+    trainer = EnergyMatchingTrainer(
+        network,
+        dataset,
+        batch_size=128,
+        lr=1.2e-3,
+        ema_decay=0.9999,
+        tau_star=1.0,
+        num_langevin_steps=200,
+        dt=0.01,
+        eps_max=0.01,
+        lambda_cd=1e-3,
+        device=device,
+    )
+
+    trainer.load_checkpoint(checkpoints_dir / "energy_matching_phase1.pt")
+    eval(
+        trainer,
+        "energy_matching_phase1",
+        sample_kwargs={"tau_s": 3.25, "num_samples": 10},
+    )
+
+    trainer.load_checkpoint(checkpoints_dir / "energy_matching_phase2.pt")
+    eval(
+        trainer,
+        "energy_matching_phase2",
+        sample_kwargs={"tau_s": 3.25, "num_samples": 10},
+    )
+
+
+def eval_eqm():
+    trainer = EqMTrainer(
+        network,
+        dataset,
+        batch_size=256,
+        lr=1e-4,
+        ema_decay=0.9999,
+        decay_type="truncated",
+        decay_a=0.8,
+        decay_b=1.0,
+        gradient_multiplier=4.0,
+        num_sampling_steps=250,
+        sampling_step_size=0.003,
+        device=device,
+    )
+    trainer.load_checkpoint(checkpoints_dir / "eqm.pt")
+
+    eval(trainer, "eqm", sample_kwargs={"num_samples": 100})
+
+
+if __name__ == "__main__":
+    checkpoints_dir = Path("checkpoints")
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    dataset = RobosuiteDataset("Lift")
     network = EnergyNetwork(
         obs_dim=32,
         action_dim=7,
@@ -18,73 +144,13 @@ def evaluate(checkpoint_path, save_name, num_episodes=3, tau_s=3.25):
         enc_output_dim=128,
         output_scale=1000.0,
     )
-    dataset = RobosuiteDataset("Lift")
-    trainer = FlowMatchingEnergyTrainer(
-        network,
-        dataset,
-        device=device,
-        dt=0.01,
-        eps_max=0.01,
-        tau_star=1.0,
-    )
-    trainer.load_checkpoint(checkpoint_path)
+    env = suite.make(env_name="Lift", robots="Panda")
 
-    env = suite.make(
-        env_name="Lift",
-        robots="Panda",
-        has_renderer=False,
-        has_offscreen_renderer=True,
-        use_camera_obs=True,
-        camera_names="agentview",
-        camera_heights=512,
-        camera_widths=512,
-        control_freq=20,
-    )
+    num_eval_episodes = 10
+    num_episode_steps = 200
+    action_selection = "min"
 
-    for ep in range(num_episodes):
-        obs = env.reset()
-        frames = []
-        total_reward = 0
+    eval_energy_matching()
+    eval_eqm()
 
-        for _ in tqdm(range(200), desc=f"{save_name} Episode {ep + 1}"):
-            state = env.sim.get_state().flatten()
-            actions = trainer.sample_actions(state, tau_s=tau_s)
-            state_tensor = (
-                torch.tensor(state, dtype=torch.float32, device=device)
-                .unsqueeze(0)
-                .expand(actions.shape[0], -1)
-            )
-            energies = trainer.network(state_tensor, actions)  # Shape: [num_samples]
-            min_idx = energies.argmin()
-            action = actions[min_idx].cpu().numpy()
-            action = np.clip(action, -1.0, 1.0)
-
-            obs, reward, done, _ = env.step(action)
-            total_reward += reward
-            frames.append(obs["agentview_image"][::-1])
-            if done:
-                break
-
-        Path("videos").mkdir(exist_ok=True)
-        video_path = f"videos/{save_name}_ep{ep + 1}.mp4"
-        imageio.mimsave(video_path, frames, fps=20)
-        print(
-            f"{save_name} Episode {ep + 1}: reward={total_reward:.3f}, saved to {video_path}"
-        )
     env.close()
-
-
-if __name__ == "__main__":
-    print("\n" + "=" * 60)
-    print("Evaluating Phase 1 (tau_s=3.25)")
-    print("=" * 60)
-    evaluate("phase1.pt", "phase1", num_episodes=3, tau_s=3.25)
-
-    print("\n" + "=" * 60)
-    print("Evaluating Phase 2 (tau_s=3.25)")
-    print("=" * 60)
-    evaluate("phase2.pt", "phase2", num_episodes=3, tau_s=3.25)
-
-    print("\n" + "=" * 60)
-    print("All evaluations complete! Videos saved to ./videos/")
-    print("=" * 60)

@@ -35,7 +35,8 @@ class EnergyNetwork(nn.Module):
         return energy.squeeze(-1) * self.output_scale
 
     def velocity(self, obs, action):
-        action = action.clone().requires_grad_(True)
-        energy = self.forward(obs.detach(), action)
-        grad = torch.autograd.grad(energy.sum(), action, create_graph=True)[0]
-        return -grad
+        with torch.enable_grad():
+            action = action.detach().clone().requires_grad_(True)
+            energy = self.forward(obs.detach(), action)
+            grad = torch.autograd.grad(energy.sum(), action, create_graph=True)[0]
+            return -grad

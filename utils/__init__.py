@@ -1,10 +1,11 @@
 from .datasets import GaussianMixtureDataset, RobosuiteDataset
 from .networks import EnergyNetwork
-from .trainers import FlowMatchingEnergyTrainer
+from .trainers import EnergyMatchingTrainer, EqMTrainer
 
 __all__ = [
-    "GaussianMixtureDataset",
+    "EnergyMatchingTrainer",
     "EnergyNetwork",
-    "FlowMatchingEnergyTrainer",
+    "EqMTrainer",
+    "GaussianMixtureDataset",
     "RobosuiteDataset",
 ]
