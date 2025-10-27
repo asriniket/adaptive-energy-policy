@@ -7,7 +7,13 @@ import robosuite as suite
 import torch
 from tqdm import tqdm
 
-from utils import EnergyMatchingTrainer, EnergyNetwork, EqMTrainer, RobosuiteDataset
+from utils import (
+    EnergyMatchingTrainer,
+    EnergyNetwork,
+    EqMContrastiveTrainer,
+    EqMTrainer,
+    RobosuiteDataset,
+)
 
 
 def eval(trainer, save_name, sample_kwargs):
@@ -98,11 +104,11 @@ def eval_energy_matching():
     )
 
     trainer.load_checkpoint(checkpoints_dir / "energy_matching_phase1.pt")
-    eval(
-        trainer,
-        "energy_matching_phase1",
-        sample_kwargs={"tau_s": 3.25, "num_samples": 10},
-    )
+    # eval(
+    #     trainer,
+    #     "energy_matching_phase1",
+    #     sample_kwargs={"tau_s": 3.25, "num_samples": 10},
+    # )
 
     trainer.load_checkpoint(checkpoints_dir / "energy_matching_phase2.pt")
     eval(
@@ -110,6 +116,29 @@ def eval_energy_matching():
         "energy_matching_phase2",
         sample_kwargs={"tau_s": 3.25, "num_samples": 10},
     )
+
+
+def eval_eqm_contrastive():
+    trainer = EqMContrastiveTrainer(
+        network,
+        dataset,
+        batch_size=256,
+        lr=1e-4,
+        ema_decay=0.9999,
+        decay_type="truncated",
+        decay_a=0.8,
+        decay_b=1.0,
+        gradient_multiplier=4.0,
+        num_sampling_steps=250,
+        sampling_step_size=0.003,
+        num_langevin_steps=200,
+        dt=0.01,
+        eps_max=0.01,
+        lambda_cd=1e-3,
+        device=device,
+    )
+    trainer.load_checkpoint(checkpoints_dir / "eqm_contrastive.pt")
+    eval(trainer, "eqm_contrastive", sample_kwargs={"num_samples": 10})
 
 
 def eval_eqm():
@@ -128,8 +157,7 @@ def eval_eqm():
         device=device,
     )
     trainer.load_checkpoint(checkpoints_dir / "eqm.pt")
-
-    eval(trainer, "eqm", sample_kwargs={"num_samples": 100})
+    eval(trainer, "eqm", sample_kwargs={"num_samples": 10})
 
 
 if __name__ == "__main__":
@@ -151,6 +179,7 @@ if __name__ == "__main__":
     action_selection = "min"
 
     eval_energy_matching()
+    eval_eqm_contrastive()
     eval_eqm()
 
     env.close()

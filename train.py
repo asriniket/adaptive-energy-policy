@@ -5,7 +5,9 @@ import torch
 from utils import (
     EnergyMatchingTrainer,
     EnergyNetwork,
+    EqMContrastiveTrainer,
     EqMTrainer,
+    GaussianMixtureDataset,
     RobosuiteDataset,
 )
 
@@ -25,12 +27,35 @@ def train_energy_matching():
         device=device,
     )
 
-    trainer.pretrain(iterations=145000)
+    trainer.pretrain(iterations=10000)
     trainer.save_checkpoint(checkpoints_dir / "energy_matching_phase1.pt")
 
     trainer.ema_decay = 0.99
-    trainer.train(iterations=2000)
+    trainer.train(iterations=2500)
     trainer.save_checkpoint(checkpoints_dir / "energy_matching_phase2.pt")
+
+
+def train_eqm_contrastive():
+    trainer = EqMContrastiveTrainer(
+        network,
+        dataset,
+        batch_size=256,
+        lr=1e-4,
+        ema_decay=0.9999,
+        decay_type="truncated",
+        decay_a=0.8,
+        decay_b=1.0,
+        gradient_multiplier=4.0,
+        num_sampling_steps=250,
+        sampling_step_size=0.003,
+        num_langevin_steps=200,
+        dt=0.01,
+        eps_max=0.01,
+        lambda_cd=1e-3,
+        device=device,
+    )
+    trainer.train(iterations=12500)
+    trainer.save_checkpoint(checkpoints_dir / "eqm_contrastive.pt")
 
 
 def train_eqm():
@@ -48,7 +73,7 @@ def train_eqm():
         sampling_step_size=0.003,
         device=device,
     )
-    trainer.train(iterations=10000)
+    trainer.train(iterations=12500)
     trainer.save_checkpoint(checkpoints_dir / "eqm.pt")
 
 
@@ -58,6 +83,7 @@ if __name__ == "__main__":
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dataset = RobosuiteDataset("Lift")
+    # dataset = GaussianMixtureDataset()
     network = EnergyNetwork(
         obs_dim=32,
         action_dim=7,
@@ -67,4 +93,5 @@ if __name__ == "__main__":
     )
 
     train_energy_matching()
+    train_eqm_contrastive()
     train_eqm()
