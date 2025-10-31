@@ -70,8 +70,8 @@ def eval(trainer, save_name, sample_kwargs):
 
     mean_reward = np.mean(ep_rewards)
     mean_success = np.mean(ep_successes)
-    print(f"{save_name} - Average Reward: {mean_reward:.1f}")
-    print(f"{save_name} - Average Success: {mean_success:.1f}")
+    print(f"{save_name} Average Reward: {mean_reward:.1f}")
+    print(f"{save_name} Average Success: {mean_success:.1f}")
     results = {
         "episode_rewards": ep_rewards,
         "episode_successes": ep_successes,
@@ -103,18 +103,18 @@ def eval_energy_matching():
         device=device,
     )
 
-    trainer.load_checkpoint(checkpoints_dir / "energy_matching_phase1.pt")
+    # trainer.load_checkpoint(checkpoints_dir / "energy_matching_phase1.pt")
     # eval(
     #     trainer,
     #     "energy_matching_phase1",
-    #     sample_kwargs={"tau_s": 3.25, "num_samples": 10},
+    #     sample_kwargs={"tau_s": 3.25, "num_samples": 64},
     # )
 
     trainer.load_checkpoint(checkpoints_dir / "energy_matching_phase2.pt")
     eval(
         trainer,
         "energy_matching_phase2",
-        sample_kwargs={"tau_s": 3.25, "num_samples": 10},
+        sample_kwargs={"tau_s": 3.25, "num_samples": 64},
     )
 
 
@@ -138,7 +138,7 @@ def eval_eqm_contrastive():
         device=device,
     )
     trainer.load_checkpoint(checkpoints_dir / "eqm_contrastive.pt")
-    eval(trainer, "eqm_contrastive", sample_kwargs={"num_samples": 10})
+    eval(trainer, "eqm_contrastive", sample_kwargs={"num_samples": 64})
 
 
 def eval_eqm():
@@ -157,29 +157,29 @@ def eval_eqm():
         device=device,
     )
     trainer.load_checkpoint(checkpoints_dir / "eqm.pt")
-    eval(trainer, "eqm", sample_kwargs={"num_samples": 10})
+    eval(trainer, "eqm", sample_kwargs={"num_samples": 64})
 
 
 if __name__ == "__main__":
     checkpoints_dir = Path("checkpoints")
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    dataset = RobosuiteDataset("Lift")
+    dataset = RobosuiteDataset("PickPlaceCan")
     network = EnergyNetwork(
-        obs_dim=32,
+        obs_dim=71,
         action_dim=7,
         hidden_dim=256,
         enc_output_dim=128,
         output_scale=1000.0,
     )
-    env = suite.make(env_name="Lift", robots="Panda")
+    env = suite.make(env_name="PickPlaceCan", robots="Panda")
 
     num_eval_episodes = 10
     num_episode_steps = 200
     action_selection = "min"
 
-    eval_energy_matching()
-    eval_eqm_contrastive()
+    # eval_energy_matching()
+    # eval_eqm_contrastive()
     eval_eqm()
 
     env.close()

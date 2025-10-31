@@ -1,14 +1,18 @@
-from pathlib import Path
-
 import matplotlib.pyplot as plt
 import numpy as np
 import ot
 import torch
 
-from utils import EnergyNetwork, GaussianMixtureDataset
 
-
-def visualize_ot_flow(num_samples=100, grid_size=100, padding_factor=0.5):
+def plot_energy_landscape_2d(
+    network,
+    dataset,
+    *,
+    num_samples=100,
+    grid_size=100,
+    padding_factor=0.5,
+    device="cuda" if torch.cuda.is_available() else "cpu",
+):
     obs = dataset[0]["obs"].unsqueeze(0).to(device)
     data = torch.stack([dataset[i]["action"] for i in range(num_samples)]).to(device)
     noise = torch.randn_like(data)
@@ -73,21 +77,19 @@ def visualize_ot_flow(num_samples=100, grid_size=100, padding_factor=0.5):
     plt.close()
 
 
-if __name__ == "__main__":
-    checkpoint_path = Path("checkpoints") / "energy_matching_phase2.pt"
+def plot_losses(info, save_path):
+    loss_keys = [k for k in info.keys() if k.endswith("_loss")]
+    _, ax = plt.subplots(figsize=(10, 6))
+    for key in loss_keys:
+        losses = info[key]
+        iterations = np.arange(len(losses))
+        label = key.replace("_loss", "").upper()
+        ax.plot(iterations, losses, label=label)
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    dataset = GaussianMixtureDataset()
-    network = EnergyNetwork(
-        obs_dim=2,
-        action_dim=2,
-        hidden_dim=256,
-        enc_output_dim=128,
-        output_scale=1000.0,
-    )
-    checkpoint = torch.load(checkpoint_path, map_location=device)
-    network.load_state_dict(checkpoint["network_state_dict"])
-    network = network.to(device)
-    network.eval()
-
-    visualize_ot_flow(num_samples=100)
+        ax.set_xlabel("Iteration")
+        ax.set_ylabel("Loss")
+        ax.set_title("Training Losses")
+        ax.legend()
+        ax.grid(True)
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()

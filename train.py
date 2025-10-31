@@ -7,8 +7,8 @@ from utils import (
     EnergyNetwork,
     EqMContrastiveTrainer,
     EqMTrainer,
-    GaussianMixtureDataset,
     RobosuiteDataset,
+    plot_losses,
 )
 
 
@@ -27,12 +27,14 @@ def train_energy_matching():
         device=device,
     )
 
-    trainer.pretrain(iterations=10000)
+    info = trainer.pretrain(iterations=10000)
     trainer.save_checkpoint(checkpoints_dir / "energy_matching_phase1.pt")
+    plot_losses(info, save_path=checkpoints_dir / "energy_matching_phase1_losses.png")
 
     trainer.ema_decay = 0.99
-    trainer.train(iterations=2500)
+    info = trainer.train(iterations=2500)
     trainer.save_checkpoint(checkpoints_dir / "energy_matching_phase2.pt")
+    plot_losses(info, save_path=checkpoints_dir / "energy_matching_phase2_losses.png")
 
 
 def train_eqm_contrastive():
@@ -54,8 +56,9 @@ def train_eqm_contrastive():
         lambda_cd=1e-3,
         device=device,
     )
-    trainer.train(iterations=12500)
+    info = trainer.train(iterations=12500)
     trainer.save_checkpoint(checkpoints_dir / "eqm_contrastive.pt")
+    plot_losses(info, save_path=checkpoints_dir / "eqm_contrastive_losses.png")
 
 
 def train_eqm():
@@ -73,8 +76,9 @@ def train_eqm():
         sampling_step_size=0.003,
         device=device,
     )
-    trainer.train(iterations=12500)
+    info = trainer.train(iterations=100000)
     trainer.save_checkpoint(checkpoints_dir / "eqm.pt")
+    plot_losses(info, save_path=checkpoints_dir / "eqm_losses.png")
 
 
 if __name__ == "__main__":
@@ -82,16 +86,15 @@ if __name__ == "__main__":
     checkpoints_dir.mkdir(exist_ok=True)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    dataset = RobosuiteDataset("Lift")
-    # dataset = GaussianMixtureDataset()
+    dataset = RobosuiteDataset("PickPlaceCan")
     network = EnergyNetwork(
-        obs_dim=32,
+        obs_dim=71,
         action_dim=7,
         hidden_dim=256,
         enc_output_dim=128,
         output_scale=1000.0,
     )
 
-    train_energy_matching()
-    train_eqm_contrastive()
+    # train_energy_matching()
+    # train_eqm_contrastive()
     train_eqm()
