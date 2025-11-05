@@ -8,11 +8,13 @@ import torch
 from tqdm import tqdm
 
 from utils import (
+    CFMTrainer,
     EnergyMatchingTrainer,
     EnergyNetwork,
     EqMContrastiveTrainer,
     EqMTrainer,
     RobosuiteDataset,
+    VelocityNetwork,
 )
 
 
@@ -51,6 +53,19 @@ def eval(trainer, save_name, sample_kwargs):
                 action = actions[rand_idx].cpu().numpy()
             elif action_selection == "mean":
                 action = actions.mean(dim=0).cpu().numpy()
+            elif action_selection == "weighted_mean":
+                obs_tensor = (
+                    torch.tensor(
+                        env.sim.get_state().flatten(),
+                        dtype=torch.float32,
+                        device=device,
+                    )
+                    .unsqueeze(0)
+                    .expand(actions.shape[0], -1)
+                )
+                energies = trainer.ema_network(obs_tensor, actions)
+                weights = torch.softmax(-energies, dim=0)
+                action = (actions * weights.unsqueeze(-1)).sum(dim=0).detach().cpu().numpy()
             else:
                 raise ValueError(f"Unknown action_selection: {action_selection}")
 
@@ -88,7 +103,31 @@ def eval(trainer, save_name, sample_kwargs):
     print(f"Results saved to {results_path}")
 
 
+def eval_cfm():
+    network = VelocityNetwork(
+        obs_dim=45, action_dim=7, hidden_dim=512, enc_output_dim=256
+    )
+    trainer = CFMTrainer(
+        network,
+        dataset,
+        batch_size=256,
+        lr=1e-4,
+        ema_decay=0.9999,
+        num_sampling_steps=250,
+        device=device,
+    )
+    trainer.load_checkpoint(checkpoints_dir / "cfm.pt")
+    eval(trainer, "cfm", sample_kwargs={"num_samples": 64})
+
+
 def eval_energy_matching():
+    network = EnergyNetwork(
+        obs_dim=45,
+        action_dim=7,
+        hidden_dim=512,
+        enc_output_dim=256,
+        output_scale=1000.0,
+    )
     trainer = EnergyMatchingTrainer(
         network,
         dataset,
@@ -102,14 +141,6 @@ def eval_energy_matching():
         lambda_cd=1e-3,
         device=device,
     )
-
-    # trainer.load_checkpoint(checkpoints_dir / "energy_matching_phase1.pt")
-    # eval(
-    #     trainer,
-    #     "energy_matching_phase1",
-    #     sample_kwargs={"tau_s": 3.25, "num_samples": 64},
-    # )
-
     trainer.load_checkpoint(checkpoints_dir / "energy_matching_phase2.pt")
     eval(
         trainer,
@@ -118,7 +149,40 @@ def eval_energy_matching():
     )
 
 
+def eval_eqm():
+    network = EnergyNetwork(
+        obs_dim=45,
+        action_dim=7,
+        hidden_dim=512,
+        enc_output_dim=256,
+        output_scale=1000.0,
+    )
+    trainer = EqMTrainer(
+        network,
+        dataset,
+        batch_size=256,
+        lr=1e-4,
+        ema_decay=0.9999,
+        decay_type="truncated",
+        decay_a=0.8,
+        decay_b=1.0,
+        gradient_multiplier=4.0,
+        num_sampling_steps=250,
+        sampling_step_size=0.003,
+        device=device,
+    )
+    trainer.load_checkpoint(checkpoints_dir / "eqm.pt")
+    eval(trainer, "eqm", sample_kwargs={"num_samples": 64})
+
+
 def eval_eqm_contrastive():
+    network = EnergyNetwork(
+        obs_dim=45,
+        action_dim=7,
+        hidden_dim=512,
+        enc_output_dim=256,
+        output_scale=1000.0,
+    )
     trainer = EqMContrastiveTrainer(
         network,
         dataset,
@@ -141,45 +205,20 @@ def eval_eqm_contrastive():
     eval(trainer, "eqm_contrastive", sample_kwargs={"num_samples": 64})
 
 
-def eval_eqm():
-    trainer = EqMTrainer(
-        network,
-        dataset,
-        batch_size=256,
-        lr=1e-4,
-        ema_decay=0.9999,
-        decay_type="truncated",
-        decay_a=0.8,
-        decay_b=1.0,
-        gradient_multiplier=4.0,
-        num_sampling_steps=250,
-        sampling_step_size=0.003,
-        device=device,
-    )
-    trainer.load_checkpoint(checkpoints_dir / "eqm.pt")
-    eval(trainer, "eqm", sample_kwargs={"num_samples": 64})
-
-
 if __name__ == "__main__":
     checkpoints_dir = Path("checkpoints")
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    dataset = RobosuiteDataset("PickPlaceCan")
-    network = EnergyNetwork(
-        obs_dim=71,
-        action_dim=7,
-        hidden_dim=256,
-        enc_output_dim=128,
-        output_scale=1000.0,
-    )
-    env = suite.make(env_name="PickPlaceCan", robots="Panda")
+    dataset = RobosuiteDataset("Square")
+    env = suite.make(env_name="NutAssemblySquare", robots="Panda")
 
     num_eval_episodes = 10
     num_episode_steps = 200
-    action_selection = "min"
+    action_selection = "mean"
 
-    # eval_energy_matching()
-    # eval_eqm_contrastive()
+    eval_cfm()
+    eval_energy_matching()
     eval_eqm()
+    eval_eqm_contrastive()
 
     env.close()

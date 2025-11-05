@@ -1,3 +1,5 @@
+import math
+
 import torch
 import torch.nn as nn
 
@@ -25,8 +27,8 @@ class EnergyNetwork(nn.Module):
         self, obs_dim, action_dim, hidden_dim, enc_output_dim, output_scale=1.0
     ):
         super().__init__()
-        self.encoder = mlp(obs_dim, hidden_dim, enc_output_dim)
-        self.energy = mlp(enc_output_dim + action_dim, [hidden_dim, hidden_dim], 1)
+        self.encoder = mlp(obs_dim, [hidden_dim] * 4, enc_output_dim)
+        self.energy = mlp(enc_output_dim + action_dim, [hidden_dim] * 2, 1)
         self.output_scale = output_scale
 
     def forward(self, obs, action):
@@ -40,3 +42,44 @@ class EnergyNetwork(nn.Module):
             energy = self.forward(obs.detach(), action)
             grad = torch.autograd.grad(energy.sum(), action, create_graph=True)[0]
             return -grad
+
+
+class SinusoidalTimeEmbedding(nn.Module):
+    def __init__(self, dim, max_period=10000):
+        super().__init__()
+        self.dim = dim
+        self.max_period = max_period
+
+    def forward(self, t):
+        if t.dim() == 1:
+            t = t.unsqueeze(-1)
+
+        half_dim = self.dim // 2
+        freqs = torch.exp(
+            -math.log(self.max_period)
+            * torch.arange(half_dim, device=t.device)
+            / half_dim
+        )
+        args = t * freqs.unsqueeze(0)
+        embedding = torch.cat([torch.sin(args), torch.cos(args)], dim=-1)
+        return embedding
+
+
+class VelocityNetwork(nn.Module):
+    def __init__(
+        self, obs_dim, action_dim, hidden_dim, enc_output_dim, time_embed_dim=256
+    ):
+        super().__init__()
+        self.encoder = mlp(obs_dim, [hidden_dim] * 4, enc_output_dim)
+        self.time_embed = SinusoidalTimeEmbedding(time_embed_dim)
+        self.velocity = mlp(
+            enc_output_dim + action_dim + time_embed_dim, [hidden_dim] * 2, action_dim
+        )
+
+    def forward(self, obs, action, t):
+        obs_enc = self.encoder(obs)
+        t_emb = self.time_embed(t)
+
+        x = torch.cat([obs_enc, action, t_emb], dim=-1)
+        velocity = self.velocity(x)
+        return velocity
