@@ -470,12 +470,9 @@ class EqMContrastiveTrainer(Trainer):
         decay_a,
         decay_b,
         gradient_multiplier,
+        lambda_cd,
         num_sampling_steps,
         sampling_step_size,
-        num_langevin_steps,
-        dt,
-        eps_max,
-        lambda_cd,
         device,
     ):
         super().__init__(
@@ -492,13 +489,9 @@ class EqMContrastiveTrainer(Trainer):
         self.decay_a = decay_a
         self.decay_b = decay_b
         self.gradient_multiplier = gradient_multiplier
+        self.lambda_cd = lambda_cd
         self.num_sampling_steps = num_sampling_steps
         self.sampling_step_size = sampling_step_size
-
-        self.num_langevin_steps = num_langevin_steps
-        self.dt = dt
-        self.eps_max = eps_max
-        self.lambda_cd = lambda_cd
 
     def c_decay(self, gamma):
         if self.decay_type == "linear":
@@ -533,57 +526,30 @@ class EqMContrastiveTrainer(Trainer):
         predicted = -self.network.velocity(obs, c_actions)
         return F.mse_loss(predicted, target)
 
-    def langevin_dynamics(self, obs, init_actions=None):
-        B = obs.shape[0]
-        obs = obs.detach()
+    def compute_contrastive_loss(self, obs, actions, is_positive):
+        energies = self.network(obs, actions)
 
-        if init_actions is not None:
-            actions = init_actions.clone()
-            use_constant_temp = True
-        else:
-            actions = torch.randn(B, self.action_dim, device=self.device)
-            use_constant_temp = False
+        pos_mask = is_positive
+        neg_mask = ~is_positive
 
-        for step in range(self.num_langevin_steps):
-            actions = actions.requires_grad_(True)
-            energy = self.network(obs, actions)
-            grad = torch.autograd.grad(energy.sum(), actions)[0]
-
-            if use_constant_temp:
-                epsilon_t = self.eps_max
-            else:
-                epsilon_t = self.eps_max * (step + 1) / self.num_langevin_steps
-
-            with torch.no_grad():
-                noise = torch.randn_like(actions)
-                actions = (
-                    actions
-                    - self.dt * grad
-                    + math.sqrt(2 * self.dt * epsilon_t) * noise
-                )
-        return actions.detach()
-
-    def compute_contrastive_loss(self, obs, actions):
-        B = obs.shape[0]
-        half_batch = B // 2
-
-        neg_actions_data = self.langevin_dynamics(
-            obs[:half_batch], init_actions=actions[:half_batch]
+        pos_energy = (
+            energies[pos_mask].mean()
+            if pos_mask.any()
+            else torch.tensor(0.0, device=self.device)
         )
-        neg_actions_noise = self.langevin_dynamics(obs[half_batch:], init_actions=None)
-        neg_actions = torch.cat([neg_actions_data, neg_actions_noise], dim=0)
-
-        pos_energy = self.network(obs, actions) / self.eps_max
-        neg_energy = self.network(obs, neg_actions) / self.eps_max
-        loss_cd = pos_energy.mean() - neg_energy.mean()
-        return loss_cd
+        neg_energy = (
+            energies[neg_mask].mean()
+            if neg_mask.any()
+            else torch.tensor(0.0, device=self.device)
+        )
+        return pos_energy - neg_energy
 
     def train(self, iterations):
         self.network.train()
         data_iter = iter(self.data_loader)
         info = {"total_loss": [], "eqm_loss": [], "cd_loss": []}
 
-        pbar = tqdm(range(iterations), desc="Training EqM")
+        pbar = tqdm(range(iterations), desc="Training EqM Contrastive")
         for _ in pbar:
             try:
                 batch = next(data_iter)
@@ -593,11 +559,17 @@ class EqMContrastiveTrainer(Trainer):
 
             obs = batch["obs"].to(self.device)
             actions = batch["action"].to(self.device)
+            is_positive = batch["is_positive"].to(self.device)
 
             self.optimizer.zero_grad()
 
-            loss_eqm = self.compute_eqm_loss(obs, actions)
-            loss_cd = self.compute_contrastive_loss(obs, actions)
+            pos_mask = is_positive
+            if pos_mask.any():
+                loss_eqm = self.compute_eqm_loss(obs[pos_mask], actions[pos_mask])
+            else:
+                loss_eqm = torch.tensor(0.0, device=self.device)
+            loss_cd = self.compute_contrastive_loss(obs, actions, is_positive)
+
             loss = loss_eqm + self.lambda_cd * loss_cd
 
             loss.backward()
@@ -607,7 +579,11 @@ class EqMContrastiveTrainer(Trainer):
             info["total_loss"].append(loss.item())
             info["eqm_loss"].append(loss_eqm.item())
             info["cd_loss"].append(loss_cd.item())
-            pbar.set_postfix(loss=f"{loss.item():.4f}")
+            pbar.set_postfix(
+                loss=f"{loss.item():.4f}",
+                eqm=f"{loss_eqm.item():.4f}",
+                cd=f"{loss_cd.item():.4f}",
+            )
         return info
 
     @torch.no_grad()

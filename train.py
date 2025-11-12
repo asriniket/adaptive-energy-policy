@@ -4,6 +4,7 @@ import torch
 
 from utils import (
     CFMTrainer,
+    ContrastiveDataset,
     EnergyMatchingTrainer,
     EnergyNetwork,
     EqMContrastiveTrainer,
@@ -92,12 +93,12 @@ def train_eqm():
 
 
 def train_eqm_contrastive():
+    dataset = ContrastiveDataset("Square")
     network = EnergyNetwork(
         obs_dim=45,
         action_dim=7,
         hidden_dim=512,
         enc_output_dim=256,
-        output_scale=1000.0,
     )
     trainer = EqMContrastiveTrainer(
         network,
@@ -109,17 +110,14 @@ def train_eqm_contrastive():
         decay_a=0.8,
         decay_b=1.0,
         gradient_multiplier=4.0,
+        lambda_cd=1e-3,
         num_sampling_steps=250,
         sampling_step_size=0.003,
-        num_langevin_steps=200,
-        dt=0.01,
-        eps_max=0.01,
-        lambda_cd=1e-3,
         device=device,
     )
     info = trainer.train(iterations=100_000)
-    trainer.save_checkpoint(checkpoints_dir / "eqm_contrastive.pt")
-    plot_losses(info, save_path=checkpoints_dir / "eqm_contrastive_losses.png")
+    trainer.save_checkpoint(checkpoints_dir / "eqm_contrastive_v2.pt")
+    plot_losses(info, save_path=checkpoints_dir / "eqm_contrastive_v2_losses.png")
 
 
 if __name__ == "__main__":
@@ -129,7 +127,7 @@ if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dataset = RobosuiteDataset("Square")
 
-    train_cfm()
-    train_energy_matching()
-    train_eqm()
+    # train_cfm()
+    # train_energy_matching()
+    # train_eqm()
     train_eqm_contrastive()

@@ -65,7 +65,9 @@ def eval(trainer, save_name, sample_kwargs):
                 )
                 energies = trainer.ema_network(obs_tensor, actions)
                 weights = torch.softmax(-energies, dim=0)
-                action = (actions * weights.unsqueeze(-1)).sum(dim=0).detach().cpu().numpy()
+                action = (
+                    (actions * weights.unsqueeze(-1)).sum(dim=0).detach().cpu().numpy()
+                )
             else:
                 raise ValueError(f"Unknown action_selection: {action_selection}")
 
@@ -177,11 +179,7 @@ def eval_eqm():
 
 def eval_eqm_contrastive():
     network = EnergyNetwork(
-        obs_dim=45,
-        action_dim=7,
-        hidden_dim=512,
-        enc_output_dim=256,
-        output_scale=1000.0,
+        obs_dim=45, action_dim=7, hidden_dim=512, enc_output_dim=256
     )
     trainer = EqMContrastiveTrainer(
         network,
@@ -193,16 +191,13 @@ def eval_eqm_contrastive():
         decay_a=0.8,
         decay_b=1.0,
         gradient_multiplier=4.0,
+        lambda_cd=1e-3,
         num_sampling_steps=250,
         sampling_step_size=0.003,
-        num_langevin_steps=200,
-        dt=0.01,
-        eps_max=0.01,
-        lambda_cd=1e-3,
         device=device,
     )
-    trainer.load_checkpoint(checkpoints_dir / "eqm_contrastive.pt")
-    eval(trainer, "eqm_contrastive", sample_kwargs={"num_samples": 64})
+    trainer.load_checkpoint(checkpoints_dir / "eqm_contrastive_v2.pt")
+    eval(trainer, "eqm_contrastive_v2", sample_kwargs={"num_samples": 64})
 
 
 if __name__ == "__main__":
@@ -216,9 +211,9 @@ if __name__ == "__main__":
     num_episode_steps = 200
     action_selection = "mean"
 
-    eval_cfm()
-    eval_energy_matching()
-    eval_eqm()
+    # eval_cfm()
+    # eval_energy_matching()
+    # eval_eqm()
     eval_eqm_contrastive()
 
     env.close()

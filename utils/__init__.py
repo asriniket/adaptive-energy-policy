@@ -1,4 +1,4 @@
-from .datasets import GaussianMixtureDataset, RobosuiteDataset
+from .datasets import ContrastiveDataset, GaussianMixtureDataset, RobosuiteDataset
 from .networks import EnergyNetwork, VelocityNetwork
 from .trainers import (
     CFMTrainer,
@@ -10,6 +10,7 @@ from .visualize import plot_energy_landscape_2d, plot_losses
 
 __all__ = [
     "CFMTrainer",
+    "ContrastiveDataset",
     "EnergyMatchingTrainer",
     "EnergyNetwork",
     "EqMContrastiveTrainer",

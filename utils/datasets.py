@@ -68,3 +68,53 @@ class RobosuiteDataset(torch.utils.data.Dataset):
         rewards = torch.from_numpy(demo["rewards"][()]).float()
         dones = torch.from_numpy(demo["dones"][()]).float()
         return {"obs": obs, "action": actions, "reward": rewards, "terminated": dones}
+
+
+class ContrastiveDataset(torch.utils.data.Dataset):
+    def __init__(self, task):
+        demos = RobosuiteDataset.load_robosuite_demo(task)
+        pos_obs, pos_actions = [], []
+        for demo in demos:
+            for i in range(len(demo["obs"])):
+                pos_obs.append(demo["obs"][i])
+                pos_actions.append(demo["action"][i])
+        num_experts = len(pos_obs)
+
+        rollout_path = Path(f"datasets/robosuite/{task}_rollouts.hdf5")
+        with h5py.File(rollout_path, "r") as f:
+            if "success/obs" in f:
+                success_obs = torch.from_numpy(f["success/obs"][()]).float()
+                success_actions = torch.from_numpy(f["success/actions"][()]).float()
+                for i in range(len(success_obs)):
+                    pos_obs.append(success_obs[i])
+                    pos_actions.append(success_actions[i])
+                num_success = len(success_obs)
+            else:
+                num_success = 0
+
+            neg_obs = torch.from_numpy(f["failure/obs"][()]).float()
+            neg_actions = torch.from_numpy(f["failure/actions"][()]).float()
+
+        self.obs = pos_obs + [neg_obs[i] for i in range(len(neg_obs))]
+        self.actions = pos_actions + [neg_actions[i] for i in range(len(neg_actions))]
+        self.is_positive = [True] * len(pos_obs) + [False] * len(neg_obs)
+
+        num_pos = len(pos_obs)
+        num_neg = len(neg_obs)
+
+        print(f"ContrastiveDataset loaded:")
+        print(
+            f"\tPositive: {num_pos} ({num_experts} experts + {num_success} successes)"
+        )
+        print(f"\tNegative: {num_neg} (failures)")
+        print(f"\tTotal: {len(self.obs)} samples")
+
+    def __len__(self):
+        return len(self.obs)
+
+    def __getitem__(self, idx):
+        return {
+            "obs": self.obs[idx],
+            "action": self.actions[idx],
+            "is_positive": self.is_positive[idx],
+        }
