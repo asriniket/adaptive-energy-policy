@@ -7,18 +7,21 @@ import robosuite as suite
 import torch
 from tqdm import tqdm
 
-from utils import (
+from trainers import (
     CFMTrainer,
     EnergyMatchingTrainer,
-    EnergyNetwork,
     EqMContrastiveTrainer,
     EqMTrainer,
+)
+from utils import (
     RobosuiteDataset,
-    VelocityNetwork,
+    StateActionEnergyNetwork,
+    StateActionVelocityNetwork,
+    set_seed,
 )
 
 
-def eval(trainer, save_name, sample_kwargs):
+def evaluate(trainer, save_name, sample_kwargs):
     videos_dir = Path("videos")
     videos_dir.mkdir(exist_ok=True)
 
@@ -32,9 +35,7 @@ def eval(trainer, save_name, sample_kwargs):
         frames = []
 
         for _ in tqdm(range(num_episode_steps), desc=f"{save_name} Episode {ep + 1}"):
-            actions = trainer.sample_actions(
-                env.sim.get_state().flatten(), **sample_kwargs
-            )
+            actions = trainer.sample(env.sim.get_state().flatten(), **sample_kwargs)
 
             if action_selection == "min":
                 obs_tensor = (
@@ -65,7 +66,9 @@ def eval(trainer, save_name, sample_kwargs):
                 )
                 energies = trainer.ema_network(obs_tensor, actions)
                 weights = torch.softmax(-energies, dim=0)
-                action = (actions * weights.unsqueeze(-1)).sum(dim=0).detach().cpu().numpy()
+                action = (
+                    (actions * weights.unsqueeze(-1)).sum(dim=0).detach().cpu().numpy()
+                )
             else:
                 raise ValueError(f"Unknown action_selection: {action_selection}")
 
@@ -104,7 +107,7 @@ def eval(trainer, save_name, sample_kwargs):
 
 
 def eval_cfm():
-    network = VelocityNetwork(
+    network = StateActionVelocityNetwork(
         obs_dim=45, action_dim=7, hidden_dim=512, enc_output_dim=256
     )
     trainer = CFMTrainer(
@@ -117,11 +120,11 @@ def eval_cfm():
         device=device,
     )
     trainer.load_checkpoint(checkpoints_dir / "cfm.pt")
-    eval(trainer, "cfm", sample_kwargs={"num_samples": 64})
+    evaluate(trainer, "cfm", sample_kwargs={"num_samples": 64})
 
 
 def eval_energy_matching():
-    network = EnergyNetwork(
+    network = StateActionEnergyNetwork(
         obs_dim=45,
         action_dim=7,
         hidden_dim=512,
@@ -142,7 +145,7 @@ def eval_energy_matching():
         device=device,
     )
     trainer.load_checkpoint(checkpoints_dir / "energy_matching_phase2.pt")
-    eval(
+    evaluate(
         trainer,
         "energy_matching_phase2",
         sample_kwargs={"tau_s": 3.25, "num_samples": 64},
@@ -150,7 +153,7 @@ def eval_energy_matching():
 
 
 def eval_eqm():
-    network = EnergyNetwork(
+    network = StateActionEnergyNetwork(
         obs_dim=45,
         action_dim=7,
         hidden_dim=512,
@@ -171,12 +174,12 @@ def eval_eqm():
         sampling_step_size=0.003,
         device=device,
     )
-    trainer.load_checkpoint(checkpoints_dir / "eqm.pt")
-    eval(trainer, "eqm", sample_kwargs={"num_samples": 64})
+    trainer.load_checkpoint(checkpoints_dir / "eqm_policy.pt")
+    evaluate(trainer, "eqm", sample_kwargs={"num_samples": 64})
 
 
 def eval_eqm_contrastive():
-    network = EnergyNetwork(
+    network = StateActionEnergyNetwork(
         obs_dim=45,
         action_dim=7,
         hidden_dim=512,
@@ -202,10 +205,12 @@ def eval_eqm_contrastive():
         device=device,
     )
     trainer.load_checkpoint(checkpoints_dir / "eqm_contrastive.pt")
-    eval(trainer, "eqm_contrastive", sample_kwargs={"num_samples": 64})
+    evaluate(trainer, "eqm_contrastive", sample_kwargs={"num_samples": 64})
 
 
 if __name__ == "__main__":
+    set_seed(0)
+
     checkpoints_dir = Path("checkpoints")
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -216,9 +221,9 @@ if __name__ == "__main__":
     num_episode_steps = 200
     action_selection = "mean"
 
-    eval_cfm()
-    eval_energy_matching()
+    # eval_cfm()
+    # eval_energy_matching()
     eval_eqm()
-    eval_eqm_contrastive()
+    # eval_eqm_contrastive()
 
     env.close()

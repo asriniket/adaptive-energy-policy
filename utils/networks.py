@@ -22,7 +22,27 @@ def mlp(input_dim, hidden_dims, output_dim, output_activation=None, dropout=0.0)
     return nn.Sequential(*layers)
 
 
-class EnergyNetwork(nn.Module):
+class StateEnergyNetwork(nn.Module):
+    def __init__(self, obs_dim, hidden_dim, enc_output_dim, output_scale=1.0):
+        super().__init__()
+        self.encoder = mlp(obs_dim, [hidden_dim] * 4, enc_output_dim)
+        self.energy = mlp(enc_output_dim, [hidden_dim] * 2, 1)
+        self.output_scale = output_scale
+
+    def forward(self, obs):
+        z = self.encoder(obs)
+        energy = self.energy(z)
+        return energy.squeeze(-1) * self.output_scale
+
+    def velocity(self, x):
+        with torch.enable_grad():
+            x = x.detach().clone().requires_grad_(True)
+            energy = self.forward(x)
+            grad = torch.autograd.grad(energy.sum(), x, create_graph=True)[0]
+            return -grad
+
+
+class StateActionEnergyNetwork(nn.Module):
     def __init__(
         self, obs_dim, action_dim, hidden_dim, enc_output_dim, output_scale=1.0
     ):
@@ -65,7 +85,7 @@ class SinusoidalTimeEmbedding(nn.Module):
         return embedding
 
 
-class VelocityNetwork(nn.Module):
+class StateActionVelocityNetwork(nn.Module):
     def __init__(
         self, obs_dim, action_dim, hidden_dim, enc_output_dim, time_embed_dim=256
     ):
