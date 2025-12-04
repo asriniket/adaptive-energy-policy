@@ -23,6 +23,8 @@ def mlp(input_dim, hidden_dims, output_dim, output_activation=None, dropout=0.0)
 
 
 class StateEnergyNetwork(nn.Module):
+    """Energy network that takes in state (observation) as input."""
+
     def __init__(self, obs_dim, hidden_dim, enc_output_dim, output_scale=1.0):
         super().__init__()
         self.encoder = mlp(obs_dim, [hidden_dim] * 4, enc_output_dim)
@@ -43,6 +45,8 @@ class StateEnergyNetwork(nn.Module):
 
 
 class StateActionEnergyNetwork(nn.Module):
+    """Energy network that takes in (s, a) as input."""
+
     def __init__(
         self, obs_dim, action_dim, hidden_dim, enc_output_dim, output_scale=1.0
     ):
@@ -61,6 +65,31 @@ class StateActionEnergyNetwork(nn.Module):
             action = action.detach().clone().requires_grad_(True)
             energy = self.forward(obs.detach(), action)
             grad = torch.autograd.grad(energy.sum(), action, create_graph=True)[0]
+            return -grad
+
+
+class StateActionStateEnergyNetwork(nn.Module):
+    """Energy network that takes in (s, a, s') as input."""
+
+    def __init__(
+        self, obs_dim, action_dim, hidden_dim, enc_output_dim, output_scale=1.0
+    ):
+        super().__init__()
+        self.encoder = mlp(obs_dim, [hidden_dim] * 4, enc_output_dim)
+        self.energy = mlp(enc_output_dim * 2 + action_dim, [hidden_dim] * 2, 1)
+        self.output_scale = output_scale
+
+    def forward(self, obs, action, next_obs):
+        z_obs = self.encoder(obs)
+        z_next_obs = self.encoder(next_obs)
+        energy = self.energy(torch.cat([z_obs, action, z_next_obs], dim=-1))
+        return energy.squeeze(-1) * self.output_scale
+
+    def velocity(self, obs, action, next_obs):
+        with torch.enable_grad():
+            next_obs = next_obs.detach().clone().requires_grad_(True)
+            energy = self.forward(obs.detach(), action.detach(), next_obs)
+            grad = torch.autograd.grad(energy.sum(), next_obs, create_graph=True)[0]
             return -grad
 
 

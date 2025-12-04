@@ -42,7 +42,6 @@ class CFMTrainer(Trainer):
     def train(self, iterations):
         self.network.train()
         data_iter = iter(self.data_loader)
-        info = {"total_loss": []}
 
         pbar = tqdm(range(iterations), desc="Training CFM")
         for _ in pbar:
@@ -61,9 +60,7 @@ class CFMTrainer(Trainer):
             self.optimizer.step()
             self.update_ema()
 
-            info["total_loss"].append(loss.item())
             pbar.set_postfix(loss=f"{loss.item():.4f}")
-        return info
 
     @torch.no_grad()
     def sample(self, obs, num_samples=1):

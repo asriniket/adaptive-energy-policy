@@ -36,10 +36,12 @@ class RobosuiteDataset(torch.utils.data.Dataset):
         demos = self.load_robosuite_demo(task)
         self.obs = []
         self.actions = []
+        self.next_obs = []
         for demo in demos:
-            for i in range(len(demo["obs"])):
+            for i in range(len(demo["obs"]) - 1):
                 self.obs.append(demo["obs"][i])
                 self.actions.append(demo["action"][i])
+                self.next_obs.append(demo["obs"][i + 1])
 
     def __len__(self):
         return len(self.obs)
@@ -48,6 +50,7 @@ class RobosuiteDataset(torch.utils.data.Dataset):
         return {
             "obs": self.obs[idx],
             "action": self.actions[idx],
+            "next_obs": self.next_obs[idx],
         }
 
     @staticmethod

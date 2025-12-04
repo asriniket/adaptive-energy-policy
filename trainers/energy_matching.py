@@ -106,7 +106,6 @@ class EnergyMatchingTrainer(Trainer):
     def pretrain(self, iterations):
         self.network.train()
         data_iter = iter(self.data_loader)
-        info = {"total_loss": []}
 
         pbar = tqdm(range(iterations), desc="Pretraining")
         for _ in pbar:
@@ -126,14 +125,11 @@ class EnergyMatchingTrainer(Trainer):
             self.optimizer.step()
             self.update_ema()
 
-            info["total_loss"].append(loss.item())
             pbar.set_postfix(loss=f"{loss.item():.4f}")
-        return info
 
     def train(self, iterations):
         self.network.train()
         data_iter = iter(self.data_loader)
-        info = {"total_loss": [], "ot_loss": [], "cd_loss": []}
 
         pbar = tqdm(range(iterations), desc="Training")
         for _ in pbar:
@@ -155,15 +151,11 @@ class EnergyMatchingTrainer(Trainer):
             self.optimizer.step()
             self.update_ema()
 
-            info["total_loss"].append(loss.item())
-            info["ot_loss"].append(loss_ot.item())
-            info["cd_loss"].append(loss_cd.item())
             pbar.set_postfix(
                 loss=f"{loss.item():.4f}",
                 ot=f"{loss_ot.item():.4f}",
                 cd=f"{loss_cd.item():.4f}",
             )
-        return info
 
     @torch.no_grad()
     def sample(self, obs, *, tau_s=3.25, num_samples=1):

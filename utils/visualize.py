@@ -75,21 +75,3 @@ def plot_energy_landscape_2d(
     plt.title("OT Flow + Energy Landscape")
     plt.savefig("ot_flow.png", dpi=150, bbox_inches="tight")
     plt.close()
-
-
-def plot_losses(info, save_path):
-    loss_keys = [k for k in info.keys() if k.endswith("_loss")]
-    _, ax = plt.subplots(figsize=(10, 6))
-    for key in loss_keys:
-        losses = info[key]
-        iterations = np.arange(len(losses))
-        label = key.replace("_loss", "").upper()
-        ax.plot(iterations, losses, label=label)
-
-        ax.set_xlabel("Iteration")
-        ax.set_ylabel("Loss")
-        ax.set_title("Training Losses")
-        ax.legend()
-        ax.grid(True)
-    plt.savefig(save_path, dpi=150, bbox_inches="tight")
-    plt.close()

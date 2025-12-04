@@ -131,7 +131,6 @@ class EqMContrastiveTrainer(Trainer):
     def train(self, iterations):
         self.network.train()
         data_iter = iter(self.data_loader)
-        info = {"total_loss": [], "eqm_loss": [], "cd_loss": []}
 
         pbar = tqdm(range(iterations), desc="Training EqM Contrastive")
         for _ in pbar:
@@ -154,11 +153,7 @@ class EqMContrastiveTrainer(Trainer):
             self.optimizer.step()
             self.update_ema()
 
-            info["total_loss"].append(loss.item())
-            info["eqm_loss"].append(loss_eqm.item())
-            info["cd_loss"].append(loss_cd.item())
             pbar.set_postfix(loss=f"{loss.item():.4f}")
-        return info
 
     @torch.no_grad()
     def sample(self, obs, num_samples=1):

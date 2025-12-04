@@ -6,15 +6,16 @@ from trainers import (
     CFMTrainer,
     EnergyMatchingTrainer,
     EqMContrastiveTrainer,
+    EqMStateActionStateTrainer,
     EqMStateTrainer,
     EqMTrainer,
 )
 from utils import (
     RobosuiteDataset,
     StateActionEnergyNetwork,
+    StateActionStateEnergyNetwork,
     StateActionVelocityNetwork,
     StateEnergyNetwork,
-    plot_losses,
     set_seed,
 )
 
@@ -32,9 +33,8 @@ def train_cfm():
         num_sampling_steps=200,
         device=device,
     )
-    info = trainer.train(iterations=100_000)
+    trainer.train(iterations=100_000)
     trainer.save_checkpoint(checkpoints_dir / "cfm.pt")
-    plot_losses(info, save_path=results_dir / "cfm_losses.png")
 
 
 def train_energy_matching():
@@ -59,14 +59,12 @@ def train_energy_matching():
         device=device,
     )
 
-    info = trainer.pretrain(iterations=87_500)
+    trainer.pretrain(iterations=87_500)
     trainer.save_checkpoint(checkpoints_dir / "energy_matching_phase1.pt")
-    plot_losses(info, save_path=results_dir / "energy_matching_phase1_losses.png")
 
     trainer.ema_decay = 0.99
-    info = trainer.train(iterations=12_500)
+    trainer.train(iterations=12_500)
     trainer.save_checkpoint(checkpoints_dir / "energy_matching_phase2.pt")
-    plot_losses(info, save_path=results_dir / "energy_matching_phase2_losses.png")
 
 
 def train_eqm():
@@ -91,9 +89,8 @@ def train_eqm():
         sampling_step_size=0.003,
         device=device,
     )
-    policy_info = policy_trainer.train(iterations=100_000)
+    policy_trainer.train(iterations=100_000)
     policy_trainer.save_checkpoint(checkpoints_dir / "eqm_policy.pt")
-    plot_losses(policy_info, save_path=results_dir / "eqm_policy_losses.png")
 
     state_network = StateEnergyNetwork(
         obs_dim=45,
@@ -115,9 +112,32 @@ def train_eqm():
         sampling_step_size=0.003,
         device=device,
     )
-    state_info = state_trainer.train(iterations=100_000)
+    state_trainer.train(iterations=100_000)
     state_trainer.save_checkpoint(checkpoints_dir / "eqm_state.pt")
-    plot_losses(state_info, save_path=results_dir / "eqm_state_losses.png")
+
+    sas_network = StateActionStateEnergyNetwork(
+        obs_dim=45,
+        action_dim=7,
+        hidden_dim=512,
+        enc_output_dim=256,
+        output_scale=1000.0,
+    )
+    sas_trainer = EqMStateActionStateTrainer(
+        sas_network,
+        dataset,
+        batch_size=256,
+        lr=1e-4,
+        ema_decay=0.9999,
+        decay_type="truncated",
+        decay_a=0.8,
+        decay_b=1.0,
+        gradient_multiplier=4.0,
+        num_sampling_steps=250,
+        sampling_step_size=0.003,
+        device=device,
+    )
+    sas_trainer.train(iterations=100_000)
+    sas_trainer.save_checkpoint(checkpoints_dir / "eqm_state_action_state.pt")
 
 
 def train_eqm_contrastive():
@@ -146,9 +166,8 @@ def train_eqm_contrastive():
         lambda_cd=1e-3,
         device=device,
     )
-    info = trainer.train(iterations=100_000)
+    trainer.train(iterations=100_000)
     trainer.save_checkpoint(checkpoints_dir / "eqm_contrastive.pt")
-    plot_losses(info, save_path=results_dir / "eqm_contrastive_losses.png")
 
 
 if __name__ == "__main__":
