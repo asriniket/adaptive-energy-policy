@@ -52,15 +52,16 @@ class RobosuiteWrapper(gym.Env):
         self._step += 1
 
         obs = self._get_obs()
-        reward = self._compute_reward(prev_obs, action, obs)
+        velocity_norm_sq = self._compute_velocity(prev_obs, action, obs)
+        reward = -velocity_norm_sq / 10.0
         terminated = self._env._check_success()
         truncated = self._step >= self.max_episode_steps
-        return obs, reward, terminated, truncated, {"success": terminated}
+        return obs, reward, terminated, truncated, {"success": terminated, "velocity_norm_sq": velocity_norm_sq}
 
     def _get_obs(self):
         return self._env.sim.get_state().flatten().astype(np.float32)
 
-    def _compute_reward(self, prev_obs, action, obs):
+    def _compute_velocity(self, prev_obs, action, obs):
         with torch.no_grad():
             prev_obs_t = torch.tensor(
                 prev_obs, dtype=torch.float32, device="cuda"
@@ -69,11 +70,9 @@ class RobosuiteWrapper(gym.Env):
                 action, dtype=torch.float32, device="cuda"
             ).unsqueeze(0)
             obs_t = torch.tensor(obs, dtype=torch.float32, device="cuda").unsqueeze(0)
-            E = self.energy_network(prev_obs_t, action_t, obs_t).item()
-
-        if np.random.random() < 0.0001:
-            print(f"E(s,a,s'): {E:.2f}")
-        return -E / 1000.0
+            velocity = self.energy_network.velocity(prev_obs_t, action_t, obs_t)
+            velocity_norm_sq = (velocity ** 2).mean().item()
+            return velocity_norm_sq
 
     def render(self):
         frame = self._env.sim.render(width=128, height=128, camera_name="agentview")
@@ -131,7 +130,7 @@ class Args:
     """total timesteps of the experiments"""
     learning_rate: float = 3e-4
     """the learning rate of the optimizer"""
-    num_envs: int = 4
+    num_envs: int = 1
     """the number of parallel game environments"""
     num_steps: int = 2048
     """the number of steps to run in each environment per policy rollout"""
@@ -343,6 +342,7 @@ if __name__ == "__main__":
     next_obs, _ = envs.reset(seed=args.seed)
     next_obs = torch.Tensor(next_obs).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
+    uploaded_videos = set()
 
     for iteration in range(1, args.num_iterations + 1):
         # Annealing the rate if instructed to do so.
@@ -368,6 +368,10 @@ if __name__ == "__main__":
             next_done = np.logical_or(terminations, truncations)
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
+
+            if "velocity_norm_sq" in infos:
+                for i in range(args.num_envs):
+                    writer.add_scalar("charts/velocity_norm_sq", infos["velocity_norm_sq"][i], global_step)
 
             if "_episode" in infos:
                 for i in range(args.num_envs):
@@ -469,6 +473,15 @@ if __name__ == "__main__":
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
         print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+
+        # Upload new training videos to WandB
+        if args.track and args.capture_video:
+            import glob
+            video_files = set(glob.glob(f"videos/{run_name}/*.mp4"))
+            new_videos = video_files - uploaded_videos
+            for video_file in new_videos:
+                wandb.log({"video": wandb.Video(video_file, format="mp4")})
+                uploaded_videos.add(video_file)
 
     if args.save_model:
         model_path = f"runs/{run_name}/{args.exp_name}.cleanrl_model"
